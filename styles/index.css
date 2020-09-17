@@ -1,0 +1,42 @@
+/*
+ Palette:
+   light #ffd0bc
+   medium #bd9184
+   highlight #dc7c40
+   dim #412f2f
+   dark #201718
+*/
+
+:root {
+   --color-light: #ffd0bc;
+   --color-medium: #bd9184;
+   --color-highlight: #dc7c40;
+   --color-dim: #412f2f;
+   --color-dark: #201718;
+}
+
+body {
+    font-size: 2em;
+    text-align: center;
+    padding: 40px;
+    height: 100%;
+    background-color: var(--color-dim);
+}
+
+textarea {
+  color: var(--color-light);
+  background-color: var(--color-dark);
+  border-color: var(--color-medium);
+}
+
+*:focus {
+  outline-color: var(--color-highlight);
+  border-color: var(--color-highlight);
+}
+
+.notebox {
+  color: var(--color-light);
+  display: block;
+  width: 95%;
+  min-height: 80vh;
+}
