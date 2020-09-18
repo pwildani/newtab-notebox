@@ -1,8 +1,29 @@
 $(document).ready(function() {
+
+  
+  let tracestore = {
+    storage: window.localStorage,
+    getItem: function (key) {
+      console.log("Get", key);
+      return this.storage.getItem(key);
+    },
+
+    setItem: function (key, value) {
+      console.log("Store", key);
+      return this.storage.setItem(key, value);
+    },
+  };
+
+  let store = new StorageBinder("uniquename", tracestore);
+  store.listen();
+  $(window).on('focus', function() { store.resolve(); });
+
   let noteMgr = new Notes($('.notebox')[0]);
+  store.bind("note", noteMgr)
 
   var calc = new Calc();
   window.calc = calc;
+  store.bind("calc.0", calc);
 
   calc.displayStack = function() {
     $('.stack')[0].value = this.stack.map((x) => "" + x).join('\n');
@@ -24,7 +45,7 @@ $(document).ready(function() {
   $('.notebox').on('keyup', function(e) {
     if (e.key == "Enter") {
       let expr = findExprAt(this.value, this.selectionStart-1);
-      if(expr !== undefined) {
+      if (expr !== undefined) {
         let result = evalExpr(calc, expr);
         if (result !== undefined) {
           e.preventDefault();
@@ -35,51 +56,77 @@ $(document).ready(function() {
           this.value = val;
         }
       }
-
     }
-    noteMgr.saveToStorage();
-    calc.saveToStorage("calc." + noteMgr.currentNote + ".", window.localStorage);
+
+    noteMgr.saveToStorage("note", store.storage);
+    calc.saveToStorage("calc." + noteMgr.currentNote, store.storage);
   });
 
-  $(window).on('focus', function() {
-    //notes = loadNotes();
-    //selectNote(notes, currentNote, $('.notebox')[0]);
-    //calc.loadDefs("calc." + currentNote + ".", window.localStorage);
-    for (route in pendingStorageChanges) {
-      let route = e.key.split('.');
-      for (let i = route.length-1; i>0; --i) {
-        let target = storageRegistry[route.slice(0, i).join('.')];
+  // Avoid displaying unstyled content until the JS is ready.
+  calc.displayVocabulary();
+  document.body.style = "";
+});
+
+// Bind things to get notified of changes to storage by a key prefix. The
+// prefix uses . separated name spaces. Partial names are not prefixes.
+function StorageBinder(name, storage) {
+  this.name = name;
+  this.storage = storage;
+
+  // keyprefix -> handler
+  this.registry = {};
+
+  // mutated keys -> true
+  this.pendingKeys = {};
+}
+
+StorageBinder.prototype = {
+  listen: function() {
+    $(window).on('storage.binder.' + this.name, (e) => {
+      if (e.storageArea === this.storage) {
+        this.pendingKeys[e.key] = true;
+      }
+    });
+  },
+
+  unlisten: function() {
+    $(window).off('storage.binder.' + this.name);
+  },
+
+  bind: function(prefix, target) {
+    this.registry[prefix] = target;
+    target.loadFromStorage(prefix, null, this.storage);
+  },
+
+  unbind: function(prefix, target) {
+    if (this.registry[prefix] === target) {
+      this.registry[prefix] = undefined;
+    }
+  },
+
+  resolve: function() {
+    for (key in this.pendingKeys) {
+      let route = key.split('.');
+      for (let i = route.length - 1; i > 0; --i) {
+        let target = this.registry[route.slice(0, i).join('.')];
         if (target) {
-          target.loadFromStorage();
+          target.loadFromStorage(route, key, this.storage);
         }
       }
     }
-  });
+    this.pendingKeys = {};
+  },
+};
 
-  let storageRegistry = {};
-  let pendingStorageChanges = [];
-  $(window).on('storage', function (e) {
-    pendingStorageChanges[e.key] = true;
-  });
-
-  let bindStorage = (prefix, thing) => {
-    storageRegistry[prefix] = thing;
-    thing.loadFromStorage(prefix + '.', window.localStorage);
-  };
-  bindStorage("note." + noteMgr.currentNote, noteMgr);
-  bindStorage("calc." + noteMgr.currentNote, calc);
-
-  document.body.style = "";
-
-});
 
 function initializeStorage() {
   window.localStorage.setItem('note', '1');
   window.localStorage.setItem('note.0', '');
 }
 
-function loadNotes() {
-  let notestr = window.localStorage.getItem('note');
+
+function loadNotes(prefix, storage) {
+  let notestr = storage.getItem(prefix);
   if (!notestr) {
     initializeStorage(); 
     return [{"index":0, "contents": ""}];
@@ -89,7 +136,7 @@ function loadNotes() {
     for (let i = 0; i < numNotes; i++) {
       notes.push({
         "index": i,
-        "contents": window.localStorage.getItem('note.' + i)
+        "contents": storage.getItem(prefix + '.' + i)
       });
       return notes;
     }
@@ -101,11 +148,12 @@ function selectNote(notes, noteIndex, display) {
   display.value = notes[noteIndex].contents;
 }
 
-function saveNote(notes, noteIndex, newcontents) {
+
+function saveNote(notes, noteIndex, newcontents, storage) {
   let oldcontents = notes[noteIndex].contents;
   if (newcontents !== oldcontents) {
     notes[noteIndex].contents = newcontents;
-    window.localStorage.setItem('note.' + noteIndex, newcontents);
+    storage.setItem('note.' + noteIndex, newcontents);
   }
 }
 
@@ -123,6 +171,7 @@ function findExprAt(body, end) {
   let expr = line.substr(0, line.length-2);
   return expr;
 }
+
 
 function evalExpr(calc, expr) {
   let words = expr.split(/\s+/);
@@ -224,8 +273,6 @@ function Calc() {
       this.defn_body.push(this.stack.pop);
     }};
 
-
-
   this.mode = this.modes['immediate'];
   this.stack = [];
   this.retstack = [];
@@ -279,11 +326,11 @@ function Calc() {
 
   this.saveToStorage = (prefix, storage) => {
     let defs = JSON.stringify(this.modes['immediate']);
-    storage.setItem(prefix + 'defs', defs);
+    storage.setItem(prefix + '.defs', defs);
   };
 
-  this.loadFromStorage = (prefix, storage) => {
-    let defstr = storage.getItem(prefix + 'defs');
+  this.loadFromStorage = (prefix, key, storage) => {
+    let defstr = storage.getItem(prefix + '.defs');
     if (defstr) {
       let defs = JSON.parse(defstr);
       if (defs !== undefined) {
@@ -299,16 +346,16 @@ function Calc() {
 function Notes(display) {
   this.display = display;
   this.currentNote = 0;
-  this.notes = loadNotes();
+  this.notes = [];
 
-  this.loadFromStorage = function(prefix, storage) {
+  this.loadFromStorage = function(prefix, key, storage) {
     this.notes = loadNotes(prefix, storage);
     selectNote(this.notes, this.currentNote, this.display);
   };
 
-  this.saveToStorage = function () {
-    this.notes = loadNotes();
-    saveNote(this.notes, this.currentNote, this.display.value);
+  this.saveToStorage = function (prefix, storage) {
+    this.notes = loadNotes(prefix, storage);
+    saveNote(this.notes, this.currentNote, this.display.value, storage);
     selectNote(this.notes, this.currentNote, this.display);
   };
 }
