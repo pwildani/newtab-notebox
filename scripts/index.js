@@ -1,24 +1,5 @@
 $(document).ready(function() {
-  let noteMgr = {
-    display: $('.notebox')[0],
-    currentNote: 0,
-    notes: loadNotes(),
-
-    loadFromStorage: function(prefix, storage) {
-      this.notes = loadNotes(prefix, storage);
-      selectNote(this.notes, this.currentNote, this.display);
-    },
-
-    saveToStorage: function () {
-      this.notes = loadNotes();
-      saveNote(this.notes, this.currentNote, this.display.value);
-      selectNote(this.notes, this.currentNote, this.display);
-    },
-  };
-
-
-
-
+  let noteMgr = new Notes($('.notebox')[0]);
 
   var calc = new Calc();
   window.calc = calc;
@@ -87,6 +68,9 @@ $(document).ready(function() {
   };
   bindStorage("note." + noteMgr.currentNote, noteMgr);
   bindStorage("calc." + noteMgr.currentNote, calc);
+
+  document.body.style = "";
+
 });
 
 function initializeStorage() {
@@ -310,3 +294,22 @@ function Calc() {
     this.displayVocabulary();
   };
 }
+
+
+function Notes(display) {
+  this.display = display;
+  this.currentNote = 0;
+  this.notes = loadNotes();
+
+  this.loadFromStorage = function(prefix, storage) {
+    this.notes = loadNotes(prefix, storage);
+    selectNote(this.notes, this.currentNote, this.display);
+  };
+
+  this.saveToStorage = function () {
+    this.notes = loadNotes();
+    saveNote(this.notes, this.currentNote, this.display.value);
+    selectNote(this.notes, this.currentNote, this.display);
+  };
+}
+
