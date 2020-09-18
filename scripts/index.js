@@ -1,128 +1,272 @@
-$(document).ready(function() {
-  let noteMgr = {
-    display: $('.notebox')[0],
-    currentNote: 0,
-    notes: loadNotes(),
-
-    loadFromStorage: function(prefix, storage) {
-      this.notes = loadNotes(prefix, storage);
-      selectNote(this.notes, this.currentNote, this.display);
-    },
-
-    saveToStorage: function () {
-      this.notes = loadNotes();
-      saveNote(this.notes, this.currentNote, this.display.value);
-      selectNote(this.notes, this.currentNote, this.display);
-    },
-  };
+import {h, text, app} from "./hyperapp.js";
+import html from "./hyperlit.js";
+import {Calc} from "./calculator.js";
+import {BindingStorage, TraceStorage, ScopedStorage} from "./storage.js";
+import genUuid from "./uuid.js";
+import {EventuallyDispatch} from "./eventually.js";
 
 
+const noteTitle = (note) => note.title || h('i',{},text("New Note"));
+const noteListItem = (state, note) => html`
+  <li key=${note.id}
+      class=${{
+        selected: state.selectedNote == note.id,
+        dirty:state.dirtyNotes[note.id],
+      }}>
+    <a onclick=${[SelectNote, note.id]}>
+      ${noteTitle(note)}
+    </a>
+  </li>
+`;
+
+const noteList = state => html`
+  <ul class="note-list">${state.noteList.map(id => noteListItem(state, state.notes[id]))}</ul>
+  <button class="add-note" onclick=${AppendAndSelectNote}>+</button>
+`;
+
+const noteDetails = (note, calc) => html`
+  <div class="content-view">
+    <textarea class="notebox"
+        onkeyup=${EditNoteKeyUp}
+        oninput=${EditNoteInput}
+        onchange=${EditNoteChange}
+      >${text(note.text)}</textarea>
+    <br/>
+    <textarea class="stack">${renderStack(calc)}</textarea>
+    <textarea class="vocabulary">${renderVolcabulary(calc)}</textarea>
+  </div>
+`;
+
+const main = state => html`
+<div>
+  <div class="left-sidebar">
+  ${noteList(state)}
+  </div>
+  ${state.selectedNote !== null && noteDetails(state.notes[state.selectedNote], state.calc)}
+</div>
+`;
 
 
+const storageRoot = new BindingStorage(new TraceStorage(window.localStorage));
 
-  var calc = new Calc();
-  window.calc = calc;
+function LoadStorageKey(state, event) {
+  state.storage.handleEvent(event);
+  return state;
+}
 
-  calc.displayStack = function() {
-    $('.stack')[0].value = this.stack.map((x) => "" + x).join('\n');
-  };
+function NoteLoaded(state, event) {
+  if (event.detail.id === state.selectedNote) {
+    return [state, [Then, {action:SelectNote, arg:event.detail.id}]];
+  }
+  return state;
+}
 
-  calc.displayVocabulary = function() {
-    let vocab = this.modes['immediate'];
+class Note {
+  constructor(id) {
+    this.id = id;
+    this._text = '';
+    this.title = '';
+  }
+  get text() {
+    return this._text;
+  }
+  set text(text) {
+    this._text = text;
+    this.title = this._text.split('\n', 1)[0];
+  }
 
-    let result = [];
-    for (let key in vocab) {
-      if (Object.prototype.hasOwnProperty.call(vocab, key)) {
-        let defn = vocab[key];
-        result.push(': ' + key + ' ' + ( defn.body? defn.body.join(' ') : '<builtin>') + ' ;');
-      }
-    }
-    $('.vocabulary')[0].value = result.join('\n');
-  };
+  save(store) {
+    store.setItem('', this.text);
+  }
 
-  $('.notebox').on('keyup', function(e) {
-    if (e.key == "Enter") {
-      let expr = findExprAt(this.value, this.selectionStart-1);
-      if(expr !== undefined) {
-        let result = evalExpr(calc, expr);
-        if (result !== undefined) {
-          e.preventDefault();
-          // inject result into text
-          let before = this.value.substr(0, this.selectionStart-1);
-          let after = this.value.substr(this.selectionStart);
-          let val = [before ,  ' '+ result , after].join('');
-          this.value = val;
-        }
-      }
+  load(store, key) {
+    const text = store.getItem('');
+    this.text = text === undefined || text === null ? '' : ''+text;
+    window.dispatchEvent(new CustomEvent("NoteLoaded", {detail: this}));
+  }
+}
 
-    }
-    noteMgr.saveToStorage();
-    calc.saveToStorage("calc." + noteMgr.currentNote + ".", window.localStorage);
+function InitialLoadNotes(dispatch, {state}) {
+  let store = state.noteStorage;
+  let noteStr = store.getItem('');
+  if (!noteStr) {
+    initializeStorage(store); 
+    noteStr = store.getItem('');
+  }
+
+  if (noteStr == "1") {
+    noteStr = "[\"0\"]";
+  }
+
+  let noteList = JSON.parse(noteStr);
+  let notes = {};
+  noteList.map((id) => new Note(id)).forEach((note) => {
+    store.bind(note.id, note);
+    note.load(store.subScope(note.id));
+    notes[note.id] = note;
   });
 
-  $(window).on('focus', function() {
-    //notes = loadNotes();
-    //selectNote(notes, currentNote, $('.notebox')[0]);
-    //calc.loadDefs("calc." + currentNote + ".", window.localStorage);
-    for (route in pendingStorageChanges) {
-      let route = e.key.split('.');
-      for (let i = route.length-1; i>0; --i) {
-        let target = storageRegistry[route.slice(0, i).join('.')];
-        if (target) {
-          target.loadFromStorage();
-        }
+  dispatch({...state, noteList, notes, selectedNote: noteList[0]});
+}
+
+function AppendNewNote(state, id) {
+  const note = new Note(id);
+  let noteList = state.noteList.map(x=>x);
+  noteList.push(id);
+  let notes = {...state.notes};
+  notes[id] = note;
+  return {...state, noteList, notes};
+}
+
+function SelectNote(state, id) {
+  return [{...state, selectedNote: null}, [Then, {action:_SelectNote, arg:id}]]
+}
+
+function _SelectNote(state, id) {
+  return {...state, selectedNote: id}
+}
+
+
+function Then(dispatch, {action, arg}) {
+  dispatch(action, arg);
+}
+
+function Later(dispatch, {action, arg}) {
+  requestAnimationFrame(() => dispatch(action, arg));
+}
+function AppendAndSelectNote(state) {
+  const id = genUuid();
+  return [state,
+    [Then, {action:AppendNewNote, arg:id}],
+    [Then, {action:SelectNote, arg:id}],
+    [Then, {action:EventuallySave}],
+  ];
+}
+
+function EventuallySave(state) {
+  state.eventuallySave.reset();
+  return state;
+}
+
+const listenToEvent = (dispatch, props) => {
+  const listener = (event) =>
+    requestAnimationFrame(() => dispatch(props.action, event))
+
+  addEventListener(props.type, listener)
+  return () => removeEventListener(props.type, listener)
+}
+export const listen = (type, action) => [listenToEvent, { type, action }]
+
+function SaveAll(state) {
+  // Root key is notes in display order.
+  state.noteStorage.setItem('', JSON.stringify(state.noteList));
+
+  // Notes are stored as subkeys as their id.
+  state.noteList.forEach(id => {
+    let note = state.notes[id];
+    state.noteStorage.bind(id, note);
+    note.save(state.noteStorage.subScope(id));
+  });
+  return state;
+}
+
+function SaveDirtyNotes(state) {
+  return [
+    {...state, dirtyNotes: {}},
+    [SaveNotesEffect,
+      {
+        notes: Object.entries(state.dirtyNotes).map(([id, _])=>state.notes[id]),
+        storage: state.noteStorage,
+      }
+    ],
+  ];
+}
+
+function SaveNotesEffect(dispatch, {notes, storage}) {
+  notes.forEach((note) => note.save(storage.subScope(note.id)));
+}
+  
+function EditNoteKeyUp(state, event) {
+  // This is an action, but it's only manipulating the state of the note, spill
+  // out to an effect.
+  return [state, [MaybeRunCalculatorAtCursor, {event, calc:state.calc}]]
+}
+
+function MaybeRunCalculatorAtCursor(dispatch, {event, calc}) {
+  if (event.key == "Enter" || event.key == " ") {
+    let notebox = event.currentTarget;
+    let expr = findExprAt(notebox.value, notebox.selectionStart-1);
+    if (expr !== undefined) {
+      console.log('evaluating', expr);
+      let result = evalExpr(calc, expr);
+      if (result !== undefined) {
+        event.preventDefault();
+        // inject result into text
+        let before = notebox.value.substr(0, notebox.selectionStart-1);
+        let after = notebox.value.substr(notebox.selectionStart);
+        let val = [before ,  ' '+ result , after].join('');
+        notebox.value = val;
       }
     }
-  });
+  }
+}
 
-  let storageRegistry = {};
-  let pendingStorageChanges = [];
-  $(window).on('storage', function (e) {
-    pendingStorageChanges[e.key] = true;
-  });
+function EditNoteInput(state, e) {
+  let notebox = e.currentTarget;
+  let note = state.notes[state.selectedNote];
+  note.text = notebox.value;
+  let dirtyNotes = {...state.dirtyNotes}
+  dirtyNotes[note.id] = true;
+  state.eventuallySaveNote.reset();
+  return {...state, dirtyNotes}
+}
 
-  let bindStorage = (prefix, thing) => {
-    storageRegistry[prefix] = thing;
-    thing.loadFromStorage(prefix + '.', window.localStorage);
-  };
-  bindStorage("note." + noteMgr.currentNote, noteMgr);
-  bindStorage("calc." + noteMgr.currentNote, calc);
+function EditNoteChange(state, e) {
+  return EditNoteInput(state, e);
+}
+
+const renderStack = function(calc) {
+  return calc.stack.map((x) => "" + x).join('\n');
+};
+
+const renderVolcabulary = function(calc) {
+  let vocab = calc.modes['immediate'];
+
+  let result = [];
+  for (let key in vocab) {
+    if (Object.prototype.hasOwnProperty.call(vocab, key)) {
+      let defn = vocab[key];
+      result.push(': ' + key + ' ' + ( defn.body? defn.body.join(' ') : '<builtin>') + ' ;');
+    }
+  }
+  return result.join('\n');
+};
+
+/*
+$('.notebox').on('keyup', function(e) {
+  if (e.key == "Enter") {
+    let expr = findExprAt(this.value, this.selectionStart-1);
+    if (expr !== undefined) {
+      let result = evalExpr(calc, expr);
+      if (result !== undefined) {
+        e.preventDefault();
+        // inject result into text
+        let before = this.value.substr(0, this.selectionStart-1);
+        let after = this.value.substr(this.selectionStart);
+        let val = [before ,  ' '+ result , after].join('');
+        this.value = val;
+      }
+    }
+  }
+
+  noteMgr.saveToStorage("note", store.storage);
+  calc.saveToStorage("calc." + noteMgr.currentNote, store.storage);
 });
+*/
 
-function initializeStorage() {
-  window.localStorage.setItem('note', '1');
-  window.localStorage.setItem('note.0', '');
-}
-
-function loadNotes() {
-  let notestr = window.localStorage.getItem('note');
-  if (!notestr) {
-    initializeStorage(); 
-    return [{"index":0, "contents": ""}];
-  } else {
-    let numNotes = JSON.parse(notestr);
-    let notes = [];
-    for (let i = 0; i < numNotes; i++) {
-      notes.push({
-        "index": i,
-        "contents": window.localStorage.getItem('note.' + i)
-      });
-      return notes;
-    }
-  }
-}
-
-
-function selectNote(notes, noteIndex, display) {
-  display.value = notes[noteIndex].contents;
-}
-
-function saveNote(notes, noteIndex, newcontents) {
-  let oldcontents = notes[noteIndex].contents;
-  if (newcontents !== oldcontents) {
-    notes[noteIndex].contents = newcontents;
-    window.localStorage.setItem('note.' + noteIndex, newcontents);
-  }
+function initializeStorage(store) {
+  store.setItem('', '[0]');
+  store.setItem('0', '');
 }
 
 
@@ -139,6 +283,7 @@ function findExprAt(body, end) {
   let expr = line.substr(0, line.length-2);
   return expr;
 }
+
 
 function evalExpr(calc, expr) {
   let words = expr.split(/\s+/);
@@ -158,155 +303,41 @@ function evalExpr(calc, expr) {
 }
 
 
-function Calc() {
-  this.handleUndefinedWord = () => {};
+function InitializeState() {
+  let blankState = {
 
-  this.modes = {};
-  this.modes['builtins'] = {
-      '': {eval: (word) => {
-        let flt = parseFloat(word);
-        if (!isNaN(flt)) {
-          this.stack.push(flt);
-        } else {
-          this.handleUndefinedWord(word);
-        }
-      }},
-      ':': {eval: (word) => { 
-          this.mode = this.modes[word];
-          this.compile_mode = word;
-          this.defn_mode = 'immediate';
-          this.defn_name = this.readWord();
-          this.defn_body = [];
-        }},
-      '+': {eval: () => {
-          let a = this.stack.pop();
-          let b = this.stack.pop();
-          this.stack.push(a + b);
-        }},
-      '-': {eval: () => {
-          let a = this.stack.pop();
-          let b = this.stack.pop();
-          this.stack.push(a - b);
-        }},
-      '*': {eval: () => {
-          let a = this.stack.pop();
-          let b = this.stack.pop();
-          this.stack.push(a * b);
-        }},
-      '/': {eval: () => {
-          let a = this.stack.pop();
-          let b = this.stack.pop();
-          this.stack.push(a / b);
-        }},
-       'drop': {eval: () => this.stack.pop()},
-       'dup': {eval: () => this.stack.push(this.stack[this.stack.length-1])},
-    };
+    // Note ids in order
+    noteList: [],
+    // Notes indexed by id.
+    notes: {},
+    // Current note loaded in the editor.
+    selectedNote: null,
 
-  this.modes['immediate'] = Object.create(this.modes['builtins']);
+    // Calculator state
+    calc: new Calc(),
 
-  // Define mode
-  this.modes[':'] =  {
-    '': {eval: (word) => { 
-      this.defn_body.push(word);
-    }},
+    storage: storageRoot,
+    noteStorage: storageRoot.subScope('note'),
+    calcStorage: storageRoot.subScope('calc'),
 
-    // Exit define mode.
-    ';': {eval: (word) => {
-      this.modes[this.defn_mode][this.defn_name] = {
-        eval: null,
-        body: this.defn_body,
-      };
-      this.mode = this.modes['immediate'];
-    }},
-
-    // Enter macro mode
-    '[': {eval: (word) => {
-      this.mode = this.modes['['];
-    }},
+    eventuallySave: new EventuallyDispatch(33, SaveAll),
+    eventuallySaveNote: new EventuallyDispatch(33, SaveDirtyNotes),
+    dirtyNotes: {},
   };
-
-  // Exit macro mode
-  this.modes['['] = Object.create(this.modes['immediate']);
-
-  // Exit immediate-in-define mode
-  this.modes['['][']'] = {
-    eval: (word) => {
-      this.mode = this.modes[this.compile_mode]
-    }};
-
-  // Emit top of stack into definition.
-  this.modes['[']['`'] = {
-    eval: (word) => {
-      this.defn_body.push(this.stack.pop);
-    }};
-
-
-
-  this.mode = this.modes['immediate'];
-  this.stack = [];
-  this.retstack = [];
-  this.step = false;
-  this.displayStack = function() {};
-  this.displayVocabulary = function() {};
-
-  this.pushStackFrame = (word) => {
-    let defn = this.mode[word];
-    if (!defn) {
-      defn = this.mode['']
-    }
-    if (defn.eval) {
-      defn.eval(word, defn);
-    } else {
-      this.retstack.push({pc:0, code: defn.body, step:this.step});
-    }
-  };
-
-  this.evalFrameStep = (frame) => {
-    if (frame != undefined && frame.pc < frame.code.length) {
-      let word = frame.code[frame.pc];
-      frame.pc += 1;
-      this.pushStackFrame(word);
-      return true;
-    }
-    return false;
-  };
-
-  this.resume = () => {
-    while(this.evalFrameStep(this.retstack[this.retstack.length-1])) {
-      let frame = this.retstack[this.retstack.length-1];
-      if (this.step && this.frame.step) {
-        break;
-      }
-    }
-  };
-
-  this.evalWord = (word, readWord) => {
-    this.readWord = readWord;
-    this.pushStackFrame(word);
-    this.resume();
-    this.displayStack();
-    this.displayVocabulary();
-    return this.stack[this.stack.length-1];
-  };
-
-  this.push = (value) => {
-    this.stack.push(value);
-  };
-
-  this.saveToStorage = (prefix, storage) => {
-    let defs = JSON.stringify(this.modes['immediate']);
-    storage.setItem(prefix + 'defs', defs);
-  };
-
-  this.loadFromStorage = (prefix, storage) => {
-    let defstr = storage.getItem(prefix + 'defs');
-    if (defstr) {
-      let defs = JSON.parse(defstr);
-      if (defs !== undefined) {
-        this.modes['immediate'] = Object.create(this.modes['builtins']);
-        Object.assign(this.modes['immediate'], defs);
-      }
-    }
-    this.displayVocabulary();
-  };
+  return [blankState, [InitialLoadNotes, {state: blankState}]];
 }
+
+
+app({
+  node: document.querySelector(".main-view"),
+  init: [InitializeState],
+  view: main,
+  subscriptions: (state) => [
+    // Edits from other instances of this page
+    listen("storage", LoadStorageKey),
+    listen("NoteLoaded", NoteLoaded),
+
+    state.eventuallySave.Subscription(),
+    state.eventuallySaveNote.Subscription(),
+  ],
+})

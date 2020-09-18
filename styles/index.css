@@ -16,7 +16,6 @@
 }
 
 body {
-    font-size: 2em;
     text-align: center;
     padding: 40px;
     height: 100%;
@@ -30,8 +29,8 @@ textarea {
 }
 
 *:focus {
-  outline-color: var(--color-highlight);
-  border-color: var(--color-highlight);
+  border-color: var(--color-light);
+  outline-color: var(--color-light);
 }
 
 .notebox {
@@ -39,4 +38,56 @@ textarea {
   display: block;
   width: 95%;
   min-height: 80vh;
+}
+
+.main-view {
+  display: grid;
+  grid-template-columns: 25mm 1fr;
+  column-gap: 0mm;
+}
+
+.left-sidebar {
+  grid-column-start: 1;
+  grid-column-end: 2;
+}
+
+.note-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.note-list li {
+  font-size: 16pt;
+  border: solid;
+  border-width: 1px 1px 1px 1px;
+  border-color: var(--color-medium);
+}
+
+.note-list li>a {
+  display: block;
+  width: auto;
+}
+
+.note-list li.selected {
+  color: var(--color-light);
+  border-color: var(--color-light);
+  border-width: 2px 0px 2px 2px;
+  background-color: var(--color-dark);
+  margin-right: -4px;
+  padding-right: 4px;
+}
+
+.note-list li.dirty {
+  list-style-type: "⌛";
+}
+
+.content-view {
+  grid-column-start: 2;
+  grid-column-end: 3;
+}
+
+.add-note {
+  min-width: 1.5cm;
+  min-height: 1.5cm;
 }
