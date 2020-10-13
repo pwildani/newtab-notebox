@@ -5,12 +5,23 @@
     <title></title>
     <link rel="stylesheet" type="text/css" href="styles/index.css">
     <script type="text/javascript" src="scripts/jquery-3.1.1.min.js"></script>
+    <!-- script type="text/javascript" src="scripts/vue.global.prod.js"></script>
+    -->
+    <script type="text/javascript" src="scripts/vue.global.js"></script>
     <script type="text/javascript" src="scripts/index.js"></script>
   </head>
-  <body>
-    <textarea class="notebox"></textarea>
-    <br>
-    <textarea class="stack"></textarea>
-    <textarea class="vocabulary"></textarea>
+  <body style="background-color: #000">
+     <div class="main-view">
+      <div class="left-sidebar">
+      <note-list class="left-sidebar note-list"></note-list>
+      <button class="add-note">+</button>
+      </div>
+      <div class="content-view">
+        <textarea class="notebox" v-model="note_text"></textarea>
+        <br>
+        <textarea class="stack"></textarea>
+        <textarea class="vocabulary"></textarea>
+      </div>
+    </div>
   </body>
 </html>

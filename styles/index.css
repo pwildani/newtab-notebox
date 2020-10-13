@@ -31,7 +31,6 @@ textarea {
 
 *:focus {
   outline-color: var(--color-highlight);
-  border-color: var(--color-highlight);
 }
 
 .notebox {
@@ -39,4 +38,20 @@ textarea {
   display: block;
   width: 95%;
   min-height: 80vh;
+}
+
+.main-view {
+  display: grid;
+  grid-template-columns: 25mm 1fr;
+  column-gap: 5mm;
+}
+
+.left-sidebar {
+  grid-column-start: 1;
+  grid-column-end: 2;
+}
+
+.content-view {
+  grid-column-start: 2;
+  grid-column-end: 3;
 }
